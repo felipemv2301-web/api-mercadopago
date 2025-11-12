@@ -9,8 +9,13 @@
 
 // Para Node.js (Render, Railway, Heroku)
 const http = require('http');
+const https = require('https');
 
 const PORT = process.env.PORT || 3000;
+
+// Access Token de MercadoPago (opcional - solo si quieres consultar merchant_orders automáticamente)
+// Configúralo como variable de entorno en Render: ACCESS_TOKEN=tu_token_aqui
+const ACCESS_TOKEN = process.env.ACCESS_TOKEN || null;
 
 const server = http.createServer((req, res) => {
     // Usar la API moderna de URL (evita el warning)
@@ -203,11 +208,32 @@ function handleWebhook(req, res) {
                 
                 console.log(`✅ Merchant Order ${merchantOrderId} actualizada`);
                 console.log(`📋 Resource URL: ${resourceUrl}`);
-                console.log(`ℹ️ Para obtener detalles, consulta: ${resourceUrl}`);
                 
-                // Nota: Para obtener más información sobre esta orden, necesitarías hacer una llamada GET a:
-                // GET https://api.mercadopago.com/merchant_orders/{merchant_order_id}
-                // Con el header: Authorization: Bearer {ACCESS_TOKEN}
+                // Si hay Access Token configurado, consultar automáticamente los detalles
+                if (ACCESS_TOKEN && merchantOrderId !== 'desconocido') {
+                    console.log(`🔍 Consultando detalles de la merchant order...`);
+                    getMerchantOrderDetails(merchantOrderId, ACCESS_TOKEN)
+                        .then(orderDetails => {
+                            console.log(`📦 Detalles de la orden:`);
+                            console.log(`   - ID: ${orderDetails.id}`);
+                            console.log(`   - Estado: ${orderDetails.order_status}`);
+                            console.log(`   - Total: ${orderDetails.total_amount} ${orderDetails.currency_id}`);
+                            
+                            if (orderDetails.payments && orderDetails.payments.length > 0) {
+                                console.log(`💳 Pagos asociados (${orderDetails.payments.length}):`);
+                                orderDetails.payments.forEach((payment, index) => {
+                                    console.log(`   ${index + 1}. Pago ${payment.id}: ${payment.status} (${payment.status_detail})`);
+                                    console.log(`      Monto: ${payment.transaction_amount} ${payment.currency_id}`);
+                                });
+                            }
+                        })
+                        .catch(error => {
+                            console.log(`⚠️ No se pudo obtener detalles (esto es opcional): ${error.message}`);
+                        });
+                } else {
+                    console.log(`ℹ️ Para obtener detalles automáticamente, configura ACCESS_TOKEN como variable de entorno`);
+                    console.log(`ℹ️ O consulta manualmente: ${resourceUrl}`);
+                }
                 
                 processed = true;
                 
@@ -263,8 +289,65 @@ function handleWebhook(req, res) {
     });
 }
 
+/**
+ * Consulta los detalles de una merchant_order desde la API de MercadoPago
+ * @param {string} merchantOrderId - ID de la merchant order
+ * @param {string} accessToken - Access Token de MercadoPago
+ * @returns {Promise<Object>} - Detalles de la merchant order
+ */
+function getMerchantOrderDetails(merchantOrderId, accessToken) {
+    return new Promise((resolve, reject) => {
+        const options = {
+            hostname: 'api.mercadopago.com',
+            path: `/merchant_orders/${merchantOrderId}`,
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Content-Type': 'application/json'
+            }
+        };
+        
+        const req = https.request(options, (res) => {
+            let data = '';
+            
+            res.on('data', (chunk) => {
+                data += chunk;
+            });
+            
+            res.on('end', () => {
+                if (res.statusCode === 200) {
+                    try {
+                        const order = JSON.parse(data);
+                        resolve(order);
+                    } catch (error) {
+                        reject(new Error('Error parseando respuesta: ' + error.message));
+                    }
+                } else {
+                    reject(new Error(`Error ${res.statusCode}: ${data}`));
+                }
+            });
+        });
+        
+        req.on('error', (error) => {
+            reject(error);
+        });
+        
+        req.setTimeout(10000, () => {
+            req.destroy();
+            reject(new Error('Timeout al consultar merchant order'));
+        });
+        
+        req.end();
+    });
+}
+
 server.listen(PORT, () => {
     console.log(`Servidor de redirección corriendo en puerto ${PORT}`);
     console.log(`Webhook endpoint: http://localhost:${PORT}/webhook`);
+    if (ACCESS_TOKEN) {
+        console.log(`✅ Access Token configurado - se consultarán detalles de merchant_orders automáticamente`);
+    } else {
+        console.log(`ℹ️ Access Token no configurado - solo se procesarán los webhooks básicos`);
+    }
 });
 
