@@ -217,14 +217,40 @@ function handleWebhook(req, res) {
                             console.log(`📦 Detalles de la orden:`);
                             console.log(`   - ID: ${orderDetails.id}`);
                             console.log(`   - Estado: ${orderDetails.order_status}`);
-                            console.log(`   - Total: ${orderDetails.total_amount} ${orderDetails.currency_id}`);
+                            console.log(`   - Total: ${orderDetails.total_amount} ${orderDetails.currency_id || 'ARS'}`);
+                            console.log(`   - Preference ID: ${orderDetails.preference_id || 'N/A'}`);
+                            
+                            // Información sobre el estado
+                            if (orderDetails.order_status === 'payment_required') {
+                                console.log(`   ⚠️ Estado: Pago pendiente - El usuario aún no completó el pago`);
+                            } else if (orderDetails.order_status === 'paid') {
+                                console.log(`   ✅ Estado: Pagado - El pago fue completado exitosamente`);
+                            } else if (orderDetails.order_status === 'expired') {
+                                console.log(`   ❌ Estado: Expirado - La orden expiró sin pago`);
+                            }
                             
                             if (orderDetails.payments && orderDetails.payments.length > 0) {
                                 console.log(`💳 Pagos asociados (${orderDetails.payments.length}):`);
                                 orderDetails.payments.forEach((payment, index) => {
-                                    console.log(`   ${index + 1}. Pago ${payment.id}: ${payment.status} (${payment.status_detail})`);
-                                    console.log(`      Monto: ${payment.transaction_amount} ${payment.currency_id}`);
+                                    console.log(`   ${index + 1}. Pago ${payment.id}:`);
+                                    console.log(`      - Estado: ${payment.status}`);
+                                    console.log(`      - Detalle: ${payment.status_detail}`);
+                                    console.log(`      - Monto: ${payment.transaction_amount} ${payment.currency_id || 'ARS'}`);
+                                    console.log(`      - Método: ${payment.payment_method_id || 'N/A'}`);
+                                    console.log(`      - Tipo: ${payment.payment_type_id || 'N/A'}`);
+                                    
+                                    // Información adicional sobre el estado del pago
+                                    if (payment.status === 'approved') {
+                                        console.log(`      ✅ PAGO APROBADO`);
+                                    } else if (payment.status === 'pending') {
+                                        console.log(`      ⏳ Pago pendiente: ${payment.status_detail}`);
+                                    } else if (payment.status === 'rejected') {
+                                        console.log(`      ❌ Pago rechazado: ${payment.status_detail}`);
+                                        console.log(`      💡 Razón: ${payment.status_detail}`);
+                                    }
                                 });
+                            } else {
+                                console.log(`   ℹ️ No hay pagos asociados aún (estado: ${orderDetails.order_status})`);
                             }
                         })
                         .catch(error => {
