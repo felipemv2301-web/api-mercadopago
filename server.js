@@ -9,19 +9,30 @@
 
 // Para Node.js (Render, Railway, Heroku)
 const http = require('http');
-const url = require('url');
 
 const PORT = process.env.PORT || 3000;
 
 const server = http.createServer((req, res) => {
-    const parsedUrl = url.parse(req.url, true);
-    const path = parsedUrl.pathname.toLowerCase();
-    const query = parsedUrl.query;
+    // Usar la API moderna de URL (evita el warning)
+    const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    const path = url.pathname.toLowerCase();
+    const query = Object.fromEntries(url.searchParams);
     
-    // Endpoint para webhooks de MercadoPago
-    if (path === '/webhook' && req.method === 'POST') {
-        handleWebhook(req, res);
-        return;
+    // Endpoint para webhooks de MercadoPago - DEBE ser POST
+    if (path === '/webhook') {
+        if (req.method === 'POST') {
+            handleWebhook(req, res);
+            return;
+        } else {
+            // Si es GET, responder con información (útil para pruebas)
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ 
+                message: 'Webhook endpoint activo',
+                method: 'Este endpoint solo acepta POST',
+                url: '/webhook'
+            }));
+            return;
+        }
     }
     
     // Obtener parámetros de la query
@@ -29,6 +40,7 @@ const server = http.createServer((req, res) => {
     const status = query.status || '';
     
     console.log(`Request recibido: ${req.method} ${path}`);
+    console.log(`Query params:`, query);
     console.log(`Payment ID: ${paymentId}, Status: ${status}`);
     
     // Determinar el estado del pago basado en la ruta
@@ -140,6 +152,11 @@ const server = http.createServer((req, res) => {
  * Maneja las notificaciones de webhook de MercadoPago
  */
 function handleWebhook(req, res) {
+    console.log('=== WEBHOOK RECIBIDO ===');
+    console.log('Method:', req.method);
+    console.log('URL:', req.url);
+    console.log('Headers:', JSON.stringify(req.headers, null, 2));
+    
     let body = '';
     
     req.on('data', chunk => {
@@ -148,41 +165,101 @@ function handleWebhook(req, res) {
     
     req.on('end', () => {
         try {
-            const data = JSON.parse(body);
-            console.log('=== WEBHOOK RECIBIDO ===');
-            console.log('Tipo:', data.type);
-            console.log('Action:', data.action);
-            console.log('Data:', JSON.stringify(data, null, 2));
+            if (!body) {
+                console.log('⚠️ Webhook sin body - puede ser una verificación de MercadoPago');
+                res.writeHead(200, { 'Content-Type': 'application/json' });
+                res.end(JSON.stringify({ 
+                    received: true, 
+                    message: 'Webhook endpoint activo',
+                    timestamp: new Date().toISOString()
+                }));
+                return;
+            }
             
-            // MercadoPago envía diferentes tipos de notificaciones
+            const data = JSON.parse(body);
+            console.log('=== WEBHOOK DATA ===');
+            console.log('Data completa:', JSON.stringify(data, null, 2));
+            
+            // MercadoPago puede enviar webhooks en diferentes formatos:
+            // 1. Formato nuevo: { type: "payment", action: "payment.updated", data: {...} }
+            // 2. Formato merchant_order: { resource: "https://...", topic: "merchant_order" }
+            // 3. Formato preference: { type: "preference", data: {...} }
+            
+            let processed = false;
+            
+            // Formato 1: Notificación de pago directo
             if (data.type === 'payment') {
                 const paymentId = data.data?.id;
                 const status = data.action; // 'payment.created', 'payment.updated', etc.
                 
-                console.log(`Pago ${paymentId} - Estado: ${status}`);
+                console.log(`✅ Pago ${paymentId} - Estado: ${status}`);
+                console.log(`✅ Webhook procesado exitosamente: Pago ${paymentId} - ${status}`);
+                processed = true;
                 
-                // Aquí podrías:
-                // 1. Guardar en una base de datos
-                // 2. Enviar notificación push a la app
-                // 3. Actualizar el estado del pago
-                // 4. Enviar email al usuario
+            // Formato 2: Notificación de merchant_order (orden de comerciante)
+            } else if (data.topic === 'merchant_order') {
+                const resourceUrl = data.resource;
+                const merchantOrderId = resourceUrl ? resourceUrl.split('/').pop() : 'desconocido';
                 
-                // Por ahora, solo logueamos
-                console.log(`Webhook procesado: Pago ${paymentId} - ${status}`);
+                console.log(`✅ Merchant Order ${merchantOrderId} actualizada`);
+                console.log(`📋 Resource URL: ${resourceUrl}`);
+                console.log(`ℹ️ Para obtener detalles, consulta: ${resourceUrl}`);
+                
+                // Nota: Para obtener más información sobre esta orden, necesitarías hacer una llamada GET a:
+                // GET https://api.mercadopago.com/merchant_orders/{merchant_order_id}
+                // Con el header: Authorization: Bearer {ACCESS_TOKEN}
+                
+                processed = true;
+                
+            // Formato 3: Notificación de preferencia
             } else if (data.type === 'preference') {
                 const preferenceId = data.data?.id;
-                console.log(`Preferencia ${preferenceId} actualizada`);
+                console.log(`✅ Preferencia ${preferenceId} actualizada`);
+                processed = true;
+                
+            // Formato desconocido
+            } else {
+                console.log(`ℹ️ Formato de notificación no reconocido:`);
+                console.log(`   - type: ${data.type}`);
+                console.log(`   - topic: ${data.topic}`);
+                console.log(`   - action: ${data.action}`);
+                console.log(`   - resource: ${data.resource}`);
             }
             
-            // Responder 200 OK a MercadoPago
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ received: true }));
+            // Aquí podrías procesar la notificación:
+            // 1. Guardar en una base de datos
+            // 2. Enviar notificación push a la app
+            // 3. Actualizar el estado del pago
+            // 4. Enviar email al usuario
+            // 5. Para merchant_order, consultar la API para obtener detalles del pago
+            
+            // Responder 200 OK a MercadoPago (importante para que no reintente)
+            res.writeHead(200, { 
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            });
+            res.end(JSON.stringify({ 
+                received: true,
+                processed: processed,
+                timestamp: new Date().toISOString(),
+                topic: data.topic || data.type || 'unknown'
+            }));
             
         } catch (error) {
-            console.error('Error procesando webhook:', error);
+            console.error('❌ Error procesando webhook:', error.message);
+            console.error('Body recibido:', body);
             res.writeHead(400, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+            res.end(JSON.stringify({ 
+                error: 'Invalid JSON',
+                message: error.message
+            }));
         }
+    });
+    
+    req.on('error', (error) => {
+        console.error('❌ Error en la request del webhook:', error);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Internal server error' }));
     });
 }
 
