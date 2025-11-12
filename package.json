@@ -1,0 +1,20 @@
+{
+  "name": "mercadopago-redirect-server",
+  "version": "1.0.0",
+  "description": "Servidor simple de redirección para MercadoPago",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "mercadopago",
+    "redirect",
+    "server"
+  ],
+  "author": "",
+  "license": "MIT",
+  "engines": {
+    "node": ">=14.0.0"
+  }
+}
+
