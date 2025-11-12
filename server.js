@@ -18,6 +18,12 @@ const server = http.createServer((req, res) => {
     const path = parsedUrl.pathname.toLowerCase();
     const query = parsedUrl.query;
     
+    // Endpoint para webhooks de MercadoPago
+    if (path === '/webhook' && req.method === 'POST') {
+        handleWebhook(req, res);
+        return;
+    }
+    
     // Obtener parámetros de la query
     const paymentId = query.payment_id || query.preference_id || '';
     const status = query.status || '';
@@ -130,7 +136,58 @@ const server = http.createServer((req, res) => {
     res.end(html);
 });
 
+/**
+ * Maneja las notificaciones de webhook de MercadoPago
+ */
+function handleWebhook(req, res) {
+    let body = '';
+    
+    req.on('data', chunk => {
+        body += chunk.toString();
+    });
+    
+    req.on('end', () => {
+        try {
+            const data = JSON.parse(body);
+            console.log('=== WEBHOOK RECIBIDO ===');
+            console.log('Tipo:', data.type);
+            console.log('Action:', data.action);
+            console.log('Data:', JSON.stringify(data, null, 2));
+            
+            // MercadoPago envía diferentes tipos de notificaciones
+            if (data.type === 'payment') {
+                const paymentId = data.data?.id;
+                const status = data.action; // 'payment.created', 'payment.updated', etc.
+                
+                console.log(`Pago ${paymentId} - Estado: ${status}`);
+                
+                // Aquí podrías:
+                // 1. Guardar en una base de datos
+                // 2. Enviar notificación push a la app
+                // 3. Actualizar el estado del pago
+                // 4. Enviar email al usuario
+                
+                // Por ahora, solo logueamos
+                console.log(`Webhook procesado: Pago ${paymentId} - ${status}`);
+            } else if (data.type === 'preference') {
+                const preferenceId = data.data?.id;
+                console.log(`Preferencia ${preferenceId} actualizada`);
+            }
+            
+            // Responder 200 OK a MercadoPago
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ received: true }));
+            
+        } catch (error) {
+            console.error('Error procesando webhook:', error);
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Invalid JSON' }));
+        }
+    });
+}
+
 server.listen(PORT, () => {
     console.log(`Servidor de redirección corriendo en puerto ${PORT}`);
+    console.log(`Webhook endpoint: http://localhost:${PORT}/webhook`);
 });
 

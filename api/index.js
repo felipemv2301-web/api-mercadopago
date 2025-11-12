@@ -6,6 +6,12 @@ export default function handler(req, res) {
     const { query } = req;
     const path = req.url.toLowerCase();
     
+    // Endpoint para webhooks de MercadoPago
+    if (path === '/webhook' && req.method === 'POST') {
+        handleWebhook(req, res);
+        return;
+    }
+    
     // Obtener parámetros de la query
     const paymentId = query.payment_id || query.preference_id || '';
     const status = query.status || '';
@@ -115,5 +121,35 @@ export default function handler(req, res) {
 </html>`;
     
     res.status(200).send(html);
+}
+
+/**
+ * Maneja las notificaciones de webhook de MercadoPago (para Vercel)
+ */
+function handleWebhook(req, res) {
+    try {
+        const data = req.body;
+        console.log('=== WEBHOOK RECIBIDO ===');
+        console.log('Tipo:', data.type);
+        console.log('Action:', data.action);
+        console.log('Data:', JSON.stringify(data, null, 2));
+        
+        // MercadoPago envía diferentes tipos de notificaciones
+        if (data.type === 'payment') {
+            const paymentId = data.data?.id;
+            const status = data.action;
+            console.log(`Pago ${paymentId} - Estado: ${status}`);
+        } else if (data.type === 'preference') {
+            const preferenceId = data.data?.id;
+            console.log(`Preferencia ${preferenceId} actualizada`);
+        }
+        
+        // Responder 200 OK a MercadoPago
+        res.status(200).json({ received: true });
+        
+    } catch (error) {
+        console.error('Error procesando webhook:', error);
+        res.status(400).json({ error: 'Invalid request' });
+    }
 }
 
